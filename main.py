@@ -1,52 +1,66 @@
-import imutils #Resize
+import numpy as np
+import imutils  #resize the image
 import cv2
+import time
 
-redLower = (58, 95, 80)
-redUpper = (147, 255, 255)
+prototxt = "MobileNetSSD_deploy.prototxt.txt"
+model = "MobileNetSSD_deploy.caffemodel"
+confThresh = 0.2
 
-camera=cv2.VideoCapture(1) #Cam Ini
+CLASSES = ["background", "aeroplane", "bicycle", "bird", "boat",
+	"bottle", "bus", "car", "cat", "chair", "cow", "diningtable",
+	"dog", "horse", "motorbike", "person", "pottedplant", "sheep",
+	"sofa", "train", "tvmonitor","mobile"]
+
+COLORS = np.random.uniform(0, 255, size=(len(CLASSES), 3))
+
+print("Loading model...")
+
+net = cv2.dnn.readNetFromCaffe(prototxt, model)
+
+print("Model Loaded")
+print("Starting Camera Feed...")
+
+vs = cv2.VideoCapture(1)
+time.sleep(2.0)
 
 while True:
+	_,frame = vs.read()
+	frame = imutils.resize(frame, width=1000)
 
-        (grabbed, frame) = camera.read() #Read the Frame
+	(h, w) = frame.shape[:2]
 
-        frame = imutils.resize(frame, width=1000) #resize
-        blurred = cv2.GaussianBlur(frame, (11, 11), 0)
-        hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV) 
+	imResizeBlob = cv2.resize(frame, (300, 300))
+	blob = cv2.dnn.blobFromImage(imResizeBlob,
+		0.007843, (300, 300), 127.5)
 
-        mask = cv2.inRange(hsv, redLower, redUpper) #Mask the blue colour
-        mask = cv2.erode(mask, None, iterations=2)
-        mask = cv2.dilate(mask, None, iterations=2)
+	net.setInput(blob)
+	detections = net.forward()
+##	print(detections)
+	detShape = detections.shape[2]
+	for i in np.arange(0,detShape):
+		confidence = detections[0, 0, i, 2]
+		if confidence > confThresh:     
+			idx = int(detections[0, 0, i, 1])
+			print("ClassID:",detections[0, 0, i, 1])
+			box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+			(startX, startY, endX, endY) = box.astype("int")
+			
+			label = "{}: {:.2f}%".format(CLASSES[idx],
+				confidence * 100)
+			cv2.rectangle(frame, (startX, startY), (endX, endY),
+				COLORS[idx], 2)
+			if startY - 15 > 15:
+				y = startY - 15
+			else:
+				startY + 15
+			cv2.putText(frame, label, (startX, y),
+				cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLORS[idx], 2)
 
-
-        cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
-                cv2.CHAIN_APPROX_SIMPLE)[-2]
-        center = None
-        if len(cnts) > 0:
-                c = max(cnts, key=cv2.contourArea)
-                ((x, y), radius) = cv2.minEnclosingCircle(c)
-                M = cv2.moments(c)
-                center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
-                if radius > 10:
-                        cv2.circle(frame, (int(x), int(y)), int(radius),
-                                (0, 255, 255), 2)
-                        cv2.circle(frame, center, 5, (0, 0, 255), -1)
-                        #print(center,radius)
-                        if radius > 250:
-                                print("stop")
-                        else:
-                                if(center[0]<150):
-                                        print("Right")
-                                elif(center[0]>450):
-                                        print("Left")
-                                elif(radius<250):
-                                        print("Front")
-                                else:
-                                        print("Stop")
-        cv2.imshow("Frame", frame)
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord("q"):
-                break
-
-camera.release()
+	cv2.imshow("Frame", frame)
+	key = cv2.waitKey(1)
+	if key == 27:
+		break
+vs.release()
 cv2.destroyAllWindows()
+
